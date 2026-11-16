@@ -1,10 +1,16 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { migrate } from "../src/migrate";
 import { createTestPool, resetDatabase } from "./helpers";
+
+// The real migration files, so this test keeps working as new migrations are added
+async function realMigrationFiles(): Promise<string[]> {
+  const files = await readdir(path.join(__dirname, "..", "migrations"));
+  return files.filter((f) => f.endsWith(".sql")).sort();
+}
 
 describe("migrate", () => {
   let pool: Pool;
@@ -25,9 +31,17 @@ describe("migrate", () => {
   it("creates the schema on an empty database", async () => {
     const result = await migrate(pool);
 
-    expect(result.applied).toEqual(["001_initial_schema.sql"]);
+    expect(result.applied).toEqual(await realMigrationFiles());
     expect(await tableNames()).toEqual(
-      expect.arrayContaining(["events", "exposures", "experiments", "schema_migrations", "variants"]),
+      expect.arrayContaining([
+        "events",
+        "exposures",
+        "experiments",
+        "feature_flag_overrides",
+        "feature_flags",
+        "schema_migrations",
+        "variants",
+      ]),
     );
   });
 
@@ -37,7 +51,7 @@ describe("migrate", () => {
     const second = await migrate(pool);
 
     expect(second.applied).toEqual([]);
-    expect(second.skipped).toEqual(["001_initial_schema.sql"]);
+    expect(second.skipped).toEqual(await realMigrationFiles());
   });
 
   it("rolls back a failing migration and keeps the previous ones", async () => {
